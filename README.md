@@ -17,7 +17,7 @@ En la segunda fase trabajé la autenticación. Ya puedo registrar usuarios con e
 
 Probé el registro y recibí 201, el login respondió 200, la consulta de mi usuario respondió 200 con un token válido y la ruta de administrador respondió 403 cuando entré con un usuario operator. Ese último resultado es correcto porque el usuario no tiene permisos de administrador.
 
-Todavía falta terminar las operaciones del catálogo y los pedidos, además de conectar esas funciones con las pantallas de Angular.
+Las operaciones del catálogo y los pedidos están disponibles en la API. Falta conectarlas con las pantallas de Angular.
 Cómo ejecutar el proyecto
 Necesito tener instalados Node.js, pnpm y PostgreSQL. Primero creo las bases de datos con los scripts de la carpeta database y preparo los archivos .env de cada servicio tomando como ejemplo sus .env.example.
 
@@ -51,6 +51,48 @@ Por qué lo organicé así
 Separé las rutas, los controladores, los servicios y las consultas a PostgreSQL para no tener todo en un solo archivo. Las rutas indican qué endpoint se usa, los controladores reciben las peticiones, los servicios manejan la lógica y los repositorios hacen las consultas a la base de datos. Así me resulta más fácil encontrar dónde cambiar una función o corregir un error.
 
 También uso TypeScript estricto para detectar problemas con los tipos de datos. Las contraseñas y otras configuraciones van en variables de entorno para no dejarlas escritas en el código.
+
+## Fase 3 — Catálogo, inventario y pedidos
+
+Aplica la migración incremental a la base existente. Agrega una descripción a los productos y un índice único de categorías que ignora mayúsculas. Si ya existen categorías que solo difieren en mayúsculas, PostgreSQL cancela la migración completa. Revisa esas categorías y acuerda cómo distinguirlas antes de volver a ejecutar el script.
+
+```sh
+psql -X -U postgres -d storder_catalog -f database/catalog-phase-3.sql
+pnpm --dir catalog-service install --frozen-lockfile
+pnpm --dir catalog-service run build
+pnpm --dir auth-service run dev
+# En otra terminal
+pnpm --dir catalog-service run dev
+```
+
+El catálogo usa `AUTH_SERVICE_URL` (por defecto `http://127.0.0.1:3001`) para consultar `GET /api/auth/me` con el JWT recibido. Así valida el usuario activo y su rol actual sin usar la base de autenticación ni compartir su clave JWT. Los administradores modifican el catálogo y el inventario. Los operadores ven sus propios pedidos y los administradores pueden consultar todos. Cualquier usuario autenticado puede crear pedidos a su nombre.
+
+### Probar la API
+
+Usa el prefijo `http://127.0.0.1:3002/api`. En las solicitudes protegidas añade `Authorization: Bearer TU_TOKEN`. Para enviar JSON, añade `Content-Type: application/json`. Obtén los tokens con `POST /api/auth/login` en el puerto 3001.
+
+| Método y ruta | Datos de prueba y resultado |
+| --- | --- |
+| `GET /categories` | Lista pública de categorías. |
+| `POST /categories` | Admin. Envía `{"name":"Oficina"}`. Devuelve `201` o `409` si ya existe. |
+| `GET /products` | Lista pública. Agrega `?name=cuaderno&categoryId=UUID_CATEGORIA` para combinar los filtros. |
+| `POST /products` | Admin. Envía `{"name":"Cuaderno","description":"Tapa dura","price":"12.50","stock":8,"categoryId":"UUID_CATEGORIA"}`. Devuelve `201` y genera el SKU. |
+| `GET /products/:id` | Detalle público del producto. |
+| `PATCH /products/:id` | Admin. Envía solo los campos a modificar, por ejemplo `{"price":"13.00"}`. |
+| `DELETE /products/:id` | Admin. Devuelve `204` si se elimina o `409` si el producto forma parte de un pedido. |
+| `GET /products/:id/stock` | Consulta pública de existencias. |
+| `PATCH /products/:id/stock` | Admin. Envía `{"stock":10}` para fijar las existencias. |
+| `POST /orders` | Usuario autenticado. Envía `{"items":[{"productId":"UUID_PRODUCTO","quantity":2}]}`. Devuelve `201` o `409` si falta stock. |
+| `GET /orders` y `GET /orders/:id` | Usuario autenticado. Lista y detalle según los permisos del usuario. |
+
+Cambia los marcadores por los UUID devueltos por la API. Los datos inválidos devuelven `400` y un recurso inexistente devuelve `404`. Para probar el descuento, consulta el stock antes y después de crear el pedido. Los precios y totales se devuelven como cadenas decimales, por ejemplo `"25.00"`.
+
+### Código para revisar antes de la defensa
+
+En `services/orders.service.ts`, revisa cómo se bloquean los productos en orden de ID y se valida todo el stock antes de crear el pedido. La inserción, el descuento y el cálculo a partir de los precios guardados en `order_items` ocurren en una sola transacción. Los pedidos conservan su precio histórico aunque cambie el precio actual del producto.
+
+Para practicar un filtro de precio máximo, agrega `maxPrice` a `productFiltersSchema` en `schemas/catalog.schemas.ts`. El DTO `ProductFilters` se infiere del esquema y el controlador ya valida `request.query`. En `repositories/catalog.repository.ts`, agrega una condición parametrizada `unit_price <= …`. En Angular, agrega un campo opcional al formulario de búsqueda y envía su valor con `HttpParams` desde el servicio que consulte productos. Durante la defensa, prueba el filtro solo y combinado con el nombre y la categoría.
+
 Uso de IA
 Usé Claude como apoyo para desarrollar y revisar algunas partes del proyecto. Fui probando los servicios en mi computadora y revisando los cambios para entender cómo funcionan. Aquí dejo registro de los prompts que utilicé, como pide la actividad.
 Prompt de la Fase 1
@@ -225,3 +267,123 @@ No continúes con la Fase 3.
 
 **Objetivo:** dejar completamente funcional el sistema de autenticación JWT de STorder sin afectar el catálogo ni el frontend existentes.
 </details>
+
+### Prompt utilizado con IA en la Fase 3
+
+````text
+Ya tengo terminadas la Fase 1, que incluye la estructura del proyecto, las conexiones a PostgreSQL y Angular inicial, y la Fase 2, que incluye registro de usuarios, inicio de sesión, JWT y permisos.
+
+Ahora quiero implementar la Fase 3: catálogo, productos, inventario y pedidos.
+
+Antes de empezar, revisa el código que ya existe en catalog-service, la base de datos y los scripts de la carpeta database. No vuelvas a crear el proyecto desde cero ni elimines datos existentes.
+
+1. Catálogo y categorías
+
+Quiero poder consultar las categorías disponibles y crear nuevas categorías desde el backend.
+
+Reutiliza la tabla categories que ya tengo en PostgreSQL. Evita categorías repetidas y valida que el nombre no esté vacío.
+
+2. Productos
+
+Implementa los endpoints necesarios para consultar, agregar, editar y eliminar productos.
+
+Cada producto debe tener nombre, descripción, precio, cantidad disponible y categoría.
+
+Quiero poder buscar productos por nombre y consultar los productos de una categoría.
+
+Valida que los precios no sean negativos, que la cantidad disponible no sea negativa y que la categoría exista.
+
+Si un producto no existe, devuelve un error adecuado.
+
+3. Inventario
+
+Cuando se agregue un producto debe quedar guardada su cantidad disponible.
+
+Quiero poder actualizar esa cantidad y consultar cuántas unidades quedan.
+
+No permitas cantidades negativas.
+
+4. Pedidos
+
+Utiliza las tablas orders y order_items que ya existen.
+
+Implementa la creación y consulta de pedidos, permitiendo incluir varios productos y sus cantidades.
+
+Al crear un pedido, el sistema debe comprobar que haya suficientes unidades disponibles.
+
+Si hay existencias, debe guardar el pedido y descontar las cantidades correspondientes.
+
+Si alguno de los productos no tiene suficientes unidades, no debe guardar el pedido ni descontar parcialmente el inventario.
+
+Utiliza transacciones de PostgreSQL para mantener los datos correctos.
+
+Calcula el total del pedido en el backend utilizando los precios guardados en la base de datos, sin confiar en un total enviado desde el frontend.
+
+5. Seguridad
+
+Revisa cómo funciona la autenticación de auth-service.
+
+Las operaciones que modifiquen el catálogo o inventario deben estar protegidas. No permitas crear, modificar o eliminar productos sin autorización.
+
+Mantén las bases de datos independientes. No consultes directamente las tablas de storder_auth desde catalog-service.
+
+Si necesitas comprobar tokens o permisos, implementa una solución compatible con la autenticación existente y explica cómo funciona, sin copiar información sensible ni romper la independencia de los servicios.
+
+6. Organización
+
+Mantén una estructura sencilla y ordenada con rutas, controladores, servicios, repositorios y validaciones, siguiendo el estilo de la Fase 2.
+
+Utiliza Node.js, Express, TypeScript estricto, PostgreSQL y Zod.
+
+No utilices any innecesariamente.
+
+Usa pnpm para las dependencias y comandos.
+
+7. Base de datos
+
+Trabaja con storder_catalog.
+
+Revisa las tablas y columnas actuales antes de escribir consultas.
+
+Si necesitas modificar alguna tabla, crea un script SQL nuevo que pueda aplicarse sin borrar los datos anteriores.
+
+No recrees las bases de datos ni elimines información existente.
+
+8. Pruebas
+
+Comprueba que funcionen el registro y la consulta de categorías, la creación y modificación de productos, la búsqueda, la actualización del inventario y la creación de pedidos.
+
+También quiero pruebas donde los datos sean incorrectos, los productos no existan o no haya suficientes unidades.
+
+Verifica que las transacciones eviten descuentos parciales y problemas cuando se hagan pedidos simultáneamente.
+
+Ejecuta la compilación TypeScript y las pruebas que permita el entorno. Si algo no se pudo probar, indícalo claramente.
+
+9. Documentación
+
+Actualiza el README con explicaciones sencillas y fáciles de entender, sin hacerlo demasiado largo ni llenarlo de listas innecesarias.
+
+Agrega este prompt completo y exactamente como fue enviado a una sección de prompts utilizados con IA. No modifiques los prompts anteriores.
+
+No agregues comentarios fingiendo que yo los escribí. Señálame las partes importantes del código para que pueda entenderlas y agregar mis propias explicaciones, como pide mi profesor.
+
+10. Importante para mi defensa
+
+Mi profesor me pedirá modificar un endpoint en vivo para filtrar por un nuevo campo y reflejar el cambio en Angular.
+
+Por eso, quiero que la consulta de productos esté organizada de manera que sea fácil agregar filtros después. Implementa ahora los filtros por nombre y categoría, pero deja otro filtro sencillo, por ejemplo precio máximo, para que yo mismo pueda practicar agregarlo durante la defensa.
+
+Explícame cuáles archivos tendría que modificar y cómo se relacionan, pero no implementes todavía el filtro de precio máximo.
+
+11. Al terminar
+
+Explícame qué archivos creaste o modificaste, qué endpoints agregaste, qué cambios hiciste en PostgreSQL y cómo puedo probar cada función.
+
+No hagas commits, push, merges ni Pull Requests.
+
+No modifiques innecesariamente auth-service o frontend-client.
+
+No avances a la Fase 4.
+
+Quiero terminar esta fase con el catálogo, inventario y pedidos funcionando correctamente desde el backend.
+````
