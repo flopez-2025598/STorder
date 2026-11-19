@@ -8,7 +8,7 @@ export const pool = new pg.Pool({
   user: env.DB_USER,
   password: env.DB_PASSWORD,
   connectionTimeoutMillis: 2000,
-  query_timeout: 2000,
+  statement_timeout: 2000,
 });
 
 pool.on('error', (error: Error) => {

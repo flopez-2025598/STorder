@@ -8,6 +8,7 @@ const schema = z.object({
   HOST: z.string().min(1).default('127.0.0.1'),
   PORT: port.default(3002),
   CORS_ORIGIN: z.url().default('http://localhost:4200'),
+  AUTH_SERVICE_URL: z.url({ protocol: /^https?$/ }).default('http://127.0.0.1:3001'),
   DB_HOST: z.string().min(1).default('127.0.0.1'),
   DB_PORT: port.default(5432),
   DB_NAME: z.literal('storder_catalog').default('storder_catalog'),
