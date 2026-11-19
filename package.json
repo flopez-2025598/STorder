@@ -1,0 +1,12 @@
+{
+  "name": "storder",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["auth-service", "catalog-service", "frontend-client"],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "dev:auth": "npm run dev -w auth-service",
+    "dev:catalog": "npm run dev -w catalog-service",
+    "dev:frontend": "npm run dev -w frontend-client"
+  }
+}
