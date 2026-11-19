@@ -13,7 +13,7 @@ const schema = z.object({
   DB_NAME: z.literal('storder_auth').default('storder_auth'),
   DB_USER: z.string().min(1).default('storder_auth_app'),
   DB_PASSWORD: z.string().min(1),
-  JWT_SECRET: z.string().min(32).optional(),
+  JWT_SECRET: z.string().min(32),
 });
 
 const result = schema.safeParse(process.env);
