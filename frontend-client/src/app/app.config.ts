@@ -1,8 +1,9 @@
-import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import type { ApplicationConfig } from '@angular/core';
-import { provideRouter, withComponentInputBinding } from '@angular/router';
+import { provideRouter } from '@angular/router';
 import { routes } from './app.routes';
+import { sessionInterceptor } from './interceptors/session.interceptor';
 
 export const appConfig: ApplicationConfig = {
-  providers: [provideRouter(routes, withComponentInputBinding()), provideHttpClient()],
+  providers: [provideRouter(routes), provideHttpClient(withInterceptors([sessionInterceptor]))],
 };
