@@ -1,5 +1,5 @@
 export const sections = [
-  { path: 'pedidos', title: 'Pedidos', description: 'Consulta y seguimiento de pedidos.' },
-  { path: 'productos', title: 'Productos', description: 'Catálogo, categorías y existencias.' },
-  { path: 'bodegas', title: 'Bodegas', description: 'Ubicaciones y distribución del inventario.' },
+  { path: 'productos', icon: 'box', title: 'Productos', description: 'Consulta el catálogo y las unidades disponibles.' },
+  { path: 'pedidos/nuevo', icon: 'cart', title: 'Nuevo pedido', description: 'Selecciona productos y cantidades.' },
+  { path: 'pedidos', icon: 'orders', title: 'Pedidos', description: 'Consulta pedidos y sus estados.' },
 ] as const;
